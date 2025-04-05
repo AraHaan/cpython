@@ -2,14 +2,11 @@
 /* Traceback implementation */
 
 #include "Python.h"
-
-#include "pycore_ast.h"           // asdl_seq_GET()
 #include "pycore_call.h"          // _PyObject_CallMethodFormat()
 #include "pycore_fileutils.h"     // _Py_BEGIN_SUPPRESS_IPH
-#include "pycore_frame.h"         // _PyFrame_GetCode()
+#include "pycore_frame.h"         // PyFrameObject
 #include "pycore_interp.h"        // PyInterpreterState.gc
-#include "pycore_parser.h"        // _PyParser_ASTFromString
-#include "pycore_pyarena.h"       // _PyArena_Free()
+#include "pycore_interpframe.h"   // _PyFrame_GetCode()
 #include "pycore_pyerrors.h"      // _PyErr_GetRaisedException()
 #include "pycore_pystate.h"       // _PyThreadState_GET()
 #include "pycore_sysmodule.h"     // _PySys_GetOptionalAttr()
@@ -24,7 +21,7 @@
 
 
 #define OFF(x) offsetof(PyTracebackObject, x)
-#define PUTS(fd, str) (void)_Py_write_noraise(fd, str, (int)strlen(str))
+#define PUTS(fd, str) (void)_Py_write_noraise(fd, str, strlen(str))
 
 #define MAX_STRING_LENGTH 500
 #define MAX_FRAME_DEPTH 100
@@ -1057,6 +1054,27 @@ write_thread_id(int fd, PyThreadState *tstate, int is_current)
     _Py_DumpHexadecimal(fd,
                         tstate->thread_id,
                         sizeof(unsigned long) * 2);
+
+    // Write the thread name
+#if defined(HAVE_PTHREAD_GETNAME_NP) || defined(HAVE_PTHREAD_GET_NAME_NP)
+    char name[100];
+    pthread_t thread = (pthread_t)tstate->thread_id;
+#ifdef HAVE_PTHREAD_GETNAME_NP
+    int rc = pthread_getname_np(thread, name, Py_ARRAY_LENGTH(name));
+#else /* defined(HAVE_PTHREAD_GET_NAME_NP) */
+    int rc = 0; /* pthread_get_name_np() returns void */
+    pthread_get_name_np(thread, name, Py_ARRAY_LENGTH(name));
+#endif
+    if (!rc) {
+        size_t len = strlen(name);
+        if (len) {
+            PUTS(fd, " [");
+            (void)_Py_write_noraise(fd, name, len);
+            PUTS(fd, "]");
+        }
+    }
+#endif
+
     PUTS(fd, " (most recent call first):\n");
 }
 
